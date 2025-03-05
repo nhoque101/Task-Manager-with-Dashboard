@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 import { Task } from '@/types/task';
-import { getStoredTasks, saveTask, updateTask as updateStoredTask, deleteTask as deleteStoredTask } from '@/utils/localStorage';
+import { api } from '@/services/api';
 import { 
     PlusIcon, 
     CheckCircleIcon, 
@@ -34,17 +34,31 @@ export default function Dashboard() {
             router.push('/login');
             return;
         }
-        // Load user's tasks
-        const userTasks = getStoredTasks(user.id);
-        setTasks(userTasks);
+        loadTasks();
     }, [user, router]);
 
-    const handleAddTask = () => {
+    const loadTasks = async () => {
+        try {
+            setIsLoading(true);
+            const userTasks = await api.tasks.getAll();
+            setTasks(userTasks);
+        } catch (error) {
+            console.error('Failed to load tasks:', error);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleAddTask = async () => {
         if (!user) return;
-        const task = saveTask(user.id, newTask);
-        setTasks([task, ...tasks]);
-        setNewTask({ title: '', description: '', status: 'pending' });
-        setShowAddModal(false);
+        try {
+            const task = await api.tasks.create(newTask);
+            setTasks([task, ...tasks]);
+            setNewTask({ title: '', description: '', status: 'pending' });
+            setShowAddModal(false);
+        } catch (error) {
+            console.error('Failed to add task:', error);
+        }
     };
 
     const handleEditTask = (task: Task) => {
@@ -52,22 +66,28 @@ export default function Dashboard() {
         setShowEditModal(true);
     };
 
-    const handleUpdateTask = () => {
+    const handleUpdateTask = async () => {
         if (!currentTask || !user) return;
-        const updatedTask = updateStoredTask(user.id, currentTask._id, currentTask);
-        if (updatedTask) {
+        try {
+            const updatedTask = await api.tasks.update(currentTask._id, currentTask);
             setTasks(tasks.map(task => 
                 task._id === currentTask._id ? updatedTask : task
             ));
+            setShowEditModal(false);
+            setCurrentTask(null);
+        } catch (error) {
+            console.error('Failed to update task:', error);
         }
-        setShowEditModal(false);
-        setCurrentTask(null);
     };
 
-    const handleDeleteTask = (taskId: string) => {
+    const handleDeleteTask = async (taskId: string) => {
         if (!user) return;
-        deleteStoredTask(user.id, taskId);
-        setTasks(tasks.filter(task => task._id !== taskId));
+        try {
+            await api.tasks.delete(taskId);
+            setTasks(tasks.filter(task => task._id !== taskId));
+        } catch (error) {
+            console.error('Failed to delete task:', error);
+        }
     };
 
     const getStatusIcon = (status: Task['status']) => {
@@ -107,46 +127,50 @@ export default function Dashboard() {
                     <h2 className="text-xl font-semibold text-gray-900">Your Tasks</h2>
                     <button
                         onClick={() => setShowAddModal(true)}
-                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                        className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
                     >
-                        <PlusIcon className="h-5 w-5" />
+                        <PlusIcon className="h-5 w-5 mr-2" />
                         Add Task
                     </button>
                 </div>
 
-                <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-                    {tasks.map((task) => (
-                        <div
-                            key={task._id}
-                            className="bg-white rounded-lg shadow-sm p-6 space-y-4"
-                        >
-                            <div className="flex items-start justify-between">
+                {isLoading ? (
+                    <div className="text-center py-8">Loading tasks...</div>
+                ) : tasks.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500">No tasks yet. Add one to get started!</div>
+                ) : (
+                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                        {tasks.map((task) => (
+                            <div
+                                key={task._id}
+                                className="bg-white rounded-lg shadow p-6"
+                            >
+                                <div className="flex justify-between items-start mb-4">
+                                    <h3 className="text-lg font-medium text-gray-900">{task.title}</h3>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={() => handleEditTask(task)}
+                                            className="text-gray-400 hover:text-gray-500"
+                                        >
+                                            <PencilIcon className="h-5 w-5" />
+                                        </button>
+                                        <button
+                                            onClick={() => handleDeleteTask(task._id)}
+                                            className="text-red-400 hover:text-red-500"
+                                        >
+                                            <TrashIcon className="h-5 w-5" />
+                                        </button>
+                                    </div>
+                                </div>
+                                <p className="text-gray-600 mb-4">{task.description}</p>
                                 <div className="flex items-center gap-2">
                                     {getStatusIcon(task.status)}
-                                    <h3 className="text-lg font-medium text-gray-900">{task.title}</h3>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <button
-                                        onClick={() => handleEditTask(task)}
-                                        className="text-gray-400 hover:text-blue-500"
-                                    >
-                                        <PencilIcon className="h-5 w-5" />
-                                    </button>
-                                    <button
-                                        onClick={() => handleDeleteTask(task._id)}
-                                        className="text-gray-400 hover:text-red-500"
-                                    >
-                                        <TrashIcon className="h-5 w-5" />
-                                    </button>
+                                    <span className="text-sm text-gray-500 capitalize">{task.status}</span>
                                 </div>
                             </div>
-                            <p className="text-gray-600">{task.description}</p>
-                            <div className="text-sm text-gray-500">
-                                Created: {new Date(task.createdAt).toLocaleDateString()}
-                            </div>
-                        </div>
-                    ))}
-                </div>
+                        ))}
+                    </div>
+                )}
             </main>
 
             {/* Add Task Modal */}

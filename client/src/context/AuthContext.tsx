@@ -1,7 +1,8 @@
 'use client';
 
 import React, { createContext, useContext, useReducer, useEffect } from 'react';
-import { AuthState, User, LoginCredentials, SignupCredentials, StoredUser } from '../types/auth';
+import { AuthState, User, LoginCredentials, SignupCredentials } from '../types/auth';
+import { api } from '../services/api';
 
 interface AuthContextType extends AuthState {
     login: (credentials: LoginCredentials) => Promise<void>;
@@ -62,39 +63,16 @@ const initialState: AuthState = {
     error: null,
 };
 
-const generateUserId = () => {
-    return 'user_' + Date.now().toString(36) + Math.random().toString(36).substr(2);
-};
-
-const getStoredUsers = (): Record<string, StoredUser> => {
-    if (typeof window === 'undefined') return {};
-    const users = localStorage.getItem('users');
-    return users ? JSON.parse(users) : {};
-};
-
-const saveUser = (user: StoredUser) => {
-    const users = getStoredUsers();
-    users[user.id] = user;
-    localStorage.setItem('users', JSON.stringify(users));
-    
-    // Store current user without password
-    const { password, ...userWithoutPassword } = user;
-    localStorage.setItem('currentUser', JSON.stringify({ 
-        user: userWithoutPassword, 
-        token: user.token 
-    }));
-};
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [state, dispatch] = useReducer(authReducer, initialState);
 
     useEffect(() => {
-        const storedUser = localStorage.getItem('currentUser');
-        if (storedUser) {
-            const { user, token } = JSON.parse(storedUser);
+        const token = localStorage.getItem('token');
+        const user = localStorage.getItem('user');
+        if (token && user) {
             dispatch({
                 type: 'LOGIN_SUCCESS',
-                payload: { user, token },
+                payload: { user: JSON.parse(user), token },
             });
         } else {
             dispatch({ type: 'SET_LOADING', payload: false });
@@ -104,24 +82,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const login = async (credentials: LoginCredentials) => {
         dispatch({ type: 'SET_LOADING', payload: true });
         try {
-            const users = getStoredUsers();
-            const user = Object.values(users).find(
-                (u) => u.email === credentials.email && u.password === credentials.password
-            );
-
-            if (!user) {
-                throw new Error('Invalid credentials');
-            }
-
-            const { password, ...userWithoutPassword } = user;
+            const { user, token } = await api.auth.login(credentials.email, credentials.password);
+            localStorage.setItem('token', token);
+            localStorage.setItem('user', JSON.stringify(user));
             dispatch({
                 type: 'LOGIN_SUCCESS',
-                payload: { user: userWithoutPassword, token: user.token },
+                payload: { user, token },
             });
-            localStorage.setItem('currentUser', JSON.stringify({ 
-                user: userWithoutPassword, 
-                token: user.token 
-            }));
         } catch (error) {
             dispatch({ type: 'SET_ERROR', payload: error instanceof Error ? error.message : 'Login failed' });
             throw error;
@@ -131,27 +98,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const signup = async (credentials: SignupCredentials) => {
         dispatch({ type: 'SET_LOADING', payload: true });
         try {
-            const users = getStoredUsers();
-            if (Object.values(users).some((u) => u.email === credentials.email)) {
-                throw new Error('Email already exists');
-            }
-
-            const userId = generateUserId();
-            const token = 'token_' + Math.random().toString(36).substr(2);
-            const newUser: StoredUser = {
-                id: userId,
-                email: credentials.email,
-                name: credentials.name,
-                password: credentials.password,
-                token,
-            };
-
-            saveUser(newUser);
-
-            const { password, ...userWithoutPassword } = newUser;
+            const { user, token } = await api.auth.signup(credentials.email, credentials.password, credentials.name);
+            localStorage.setItem('token', token);
+            localStorage.setItem('user', JSON.stringify(user));
             dispatch({
                 type: 'LOGIN_SUCCESS',
-                payload: { user: userWithoutPassword, token },
+                payload: { user, token },
             });
         } catch (error) {
             dispatch({ type: 'SET_ERROR', payload: error instanceof Error ? error.message : 'Signup failed' });
@@ -160,7 +112,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     const logout = () => {
-        localStorage.removeItem('currentUser');
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
         dispatch({ type: 'LOGOUT' });
     };
 
